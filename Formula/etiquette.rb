@@ -4,11 +4,10 @@ class Etiquette < Formula
   version "1.0.0"
   license "MIT"
 
-  # For private repos, use SSH
-  head "git@github.com:leepickdev/etiquette.git", branch: "main"
-
-  # For local development, use: brew install --HEAD etiquette
-  # Or set ETIQUETTE_LOCAL env var for local source
+  # Install from HEAD using git (works with SSH keys for private repos)
+  head do
+    url "https://github.com/leepickdev/etiquette.git", branch: "main", using: :git
+  end
 
   # No Python dependency - pure bash
 
@@ -27,15 +26,39 @@ class Etiquette < Formula
     (share/"etiquette/skills").install Dir["skills/*"]
 
     # Create global init script
-    (bin/"etiquette-init").write <<~EOS
+    (bin/"etiquette").write <<~EOS
       #!/bin/bash
       # Initialize etiquette in current project
       set -e
 
       ETIQUETTE_DIR=".etiquette"
+      PROVIDER_OVERRIDE=""
+      FORCE=false
 
-      if [[ -d "$ETIQUETTE_DIR" ]]; then
+      # Parse arguments
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --provider|-p) PROVIDER_OVERRIDE="$2"; shift 2 ;;
+          --provider=*) PROVIDER_OVERRIDE="${1#*=}"; shift ;;
+          --force|-f) FORCE=true; shift ;;
+          --help|-h)
+            echo "Usage: etiquette [--provider claude|codex|gemini] [--force]"
+            echo ""
+            echo "Initialize Etiquette in current project"
+            echo ""
+            echo "Options:"
+            echo "  -p, --provider   Set provider (claude, codex, gemini)"
+            echo "  -f, --force      Reinitialize even if already exists"
+            echo "  -h, --help       Show this help"
+            exit 0
+            ;;
+          *) shift ;;
+        esac
+      done
+
+      if [[ -d "$ETIQUETTE_DIR" ]] && [[ "$FORCE" == false ]]; then
         echo "Etiquette already initialized in this project"
+        echo "Use --force to reinitialize"
         exit 0
       fi
 
@@ -48,17 +71,30 @@ class Etiquette < Formula
       cp "#{libexec}/.etiquette/hive" "$ETIQUETTE_DIR/"
       cp "#{libexec}/.etiquette/bin/"* "$ETIQUETTE_DIR/bin/"
 
-      # Detect provider and copy appropriate docs
-      if command -v claude &>/dev/null; then
-        PROVIDER="claude"
-      elif command -v codex &>/dev/null; then
+      # Determine provider (flag > env > auto-detect)
+      if [[ -n "$PROVIDER_OVERRIDE" ]]; then
+        PROVIDER="$PROVIDER_OVERRIDE"
+      elif [[ -n "$ETIQUETTE_PROVIDER" ]]; then
+        PROVIDER="$ETIQUETTE_PROVIDER"
+      elif command -v codex &>/dev/null && ! command -v claude &>/dev/null; then
         PROVIDER="codex"
-        cp -r "#{libexec}/providers/codex/docs/"* "$ETIQUETTE_DIR/docs/" 2>/dev/null || true
-      elif command -v gemini &>/dev/null; then
+      elif command -v gemini &>/dev/null && ! command -v claude &>/dev/null; then
         PROVIDER="gemini"
-        cp -r "#{libexec}/providers/gemini/docs/"* "$ETIQUETTE_DIR/docs/" 2>/dev/null || true
       else
         PROVIDER="claude"
+      fi
+
+      # Validate provider
+      if [[ "$PROVIDER" != "claude" && "$PROVIDER" != "codex" && "$PROVIDER" != "gemini" ]]; then
+        echo "Error: Invalid provider '$PROVIDER'. Use: claude, codex, or gemini"
+        exit 1
+      fi
+
+      # Copy provider-specific docs
+      if [[ "$PROVIDER" == "codex" ]]; then
+        cp -r "#{libexec}/providers/codex/docs/"* "$ETIQUETTE_DIR/docs/" 2>/dev/null || true
+      elif [[ "$PROVIDER" == "gemini" ]]; then
+        cp -r "#{libexec}/providers/gemini/docs/"* "$ETIQUETTE_DIR/docs/" 2>/dev/null || true
       fi
 
       echo "{\\"provider\\": \\"$PROVIDER\\"}" > "$ETIQUETTE_DIR/config/provider.json"
@@ -72,7 +108,7 @@ class Etiquette < Formula
       fi
 
       echo ""
-      echo "Etiquette initialized with provider: $PROVIDER"
+      echo "✓ Etiquette initialized with provider: $PROVIDER"
       echo ""
       echo "Next steps:"
       if [[ "$PROVIDER" != "claude" ]]; then
@@ -85,7 +121,7 @@ class Etiquette < Formula
       echo ""
     EOS
 
-    chmod 0755, bin/"etiquette-init"
+    chmod 0755, bin/"etiquette"
   end
 
   def caveats
@@ -94,15 +130,15 @@ class Etiquette < Formula
 
       QUICK START:
         cd your-project
-        etiquette-init
+        etiquette --provider codex
 
       FOR CLAUDE CODE USERS:
-        Skills installed at: #{share}/etiquette/skills/
-        Use /etiquette:hive-bootstrap to set up your swarm
+        etiquette
+        Then in Claude Code: /etiquette:hive-bootstrap
 
       FOR CODEX/GEMINI USERS:
-        After init, start the launch daemon in a separate terminal:
-        .etiquette/bin/hive-launch-daemon
+        etiquette -p codex
+        Then start daemon: .etiquette/bin/hive-launch-daemon
 
       DOCUMENTATION:
         https://github.com/leepickdev/etiquette
@@ -110,6 +146,6 @@ class Etiquette < Formula
   end
 
   test do
-    system bin/"etiquette-init", "--help"
+    system bin/"etiquette", "--help"
   end
 end
