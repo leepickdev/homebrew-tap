@@ -1,9 +1,14 @@
 class Etiquette < Formula
   desc "Multi-LLM agent swarms with Claude, Codex, or Gemini"
   homepage "https://github.com/leepickdev/etiquette"
-  url "https://github.com/leepickdev/etiquette/archive/refs/tags/v1.0.0.tar.gz"
-  sha256 :no_check  # Updated by release workflow
+  version "1.0.0"
   license "MIT"
+
+  # For private repos, use SSH
+  head "git@github.com:leepickdev/etiquette.git", branch: "main"
+
+  # For local development, use: brew install --HEAD etiquette
+  # Or set ETIQUETTE_LOCAL env var for local source
 
   # No Python dependency - pure bash
 
