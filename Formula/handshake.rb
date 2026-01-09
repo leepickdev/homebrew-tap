@@ -2,7 +2,7 @@ class Handshake < Formula
   desc "Multi-agent swarm orchestration for parallel development with Claude Code"
   homepage "https://github.com/leepickdev/handshake"
   # Private repo - requires HOMEBREW_GITHUB_API_TOKEN for org members
-  url "https://github.com/leepickdev/handshake/archive/refs/tags/v1.9.3.tar.gz"
+  url "https://github.com/leepickdev/handshake/archive/refs/tags/v2.0.0.tar.gz"
   sha256 :no_check  # Will be updated by release workflow
   license "MIT"
 
