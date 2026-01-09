@@ -3,7 +3,7 @@ class Handshake < Formula
   homepage "https://github.com/leepickdev/handshake"
   # Private repo - requires HOMEBREW_GITHUB_API_TOKEN for org members
   url "https://github.com/leepickdev/handshake/archive/refs/tags/v1.0.0.tar.gz"
-  sha256 :no_check  # Will be updated by release workflow
+  sha256 "0019dfc4b32d63c1392aa264aed2253c1e0c2fb09216f8e2cc269bbfb8bb49b5"
   license "MIT"
 
   # Note: This formula requires access to leepickdev/handshake (private repo)
