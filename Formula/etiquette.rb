@@ -1,151 +1,130 @@
 class Etiquette < Formula
-  desc "Multi-LLM agent swarms with Claude, Codex, or Gemini"
+  desc "Multi-agent swarm orchestration for Codex and Gemini CLIs"
   homepage "https://github.com/leepickdev/etiquette"
-  version "1.0.0"
-  license "MIT"
+  version "1.1.0"
+  license "AGPL-3.0"
 
-  # Install from HEAD using git (works with SSH keys for private repos)
   head do
     url "https://github.com/leepickdev/etiquette.git", branch: "main", using: :git
   end
 
-  # No Python dependency - pure bash
+  depends_on "tmux"
+  depends_on "jq"
 
   def install
-    # Store core binaries in libexec
-    (libexec/".etiquette/bin").mkpath
-    cp_r Dir["core/bin/*"], libexec/".etiquette/bin/"
-
-    # Store templates
-    cp "templates/hive", libexec/".etiquette/hive"
-
-    # Store provider docs
+    (libexec/"bin").mkpath
+    cp_r Dir["core/bin/*"], libexec/"bin/"
+    cp "templates/hive", libexec/"hive"
     (libexec/"providers").install Dir["providers/*"]
+    (libexec/"skills").install Dir["skills/*"]
+    cp "bootstrap.sh", libexec/"bootstrap.sh"
 
-    # Install skills for Claude plugin
-    (share/"etiquette/skills").install Dir["skills/*"]
-
-    # Create global init script
     (bin/"etiquette").write <<~EOS
       #!/bin/bash
-      # Initialize etiquette in current project
       set -e
-
+      ETIQUETTE_LIBEXEC="#{libexec}"
       ETIQUETTE_DIR=".etiquette"
-      PROVIDER_OVERRIDE=""
-      FORCE=false
 
-      # Parse arguments
-      while [[ $# -gt 0 ]]; do
-        case "$1" in
-          --provider|-p) PROVIDER_OVERRIDE="$2"; shift 2 ;;
-          --provider=*) PROVIDER_OVERRIDE="${1#*=}"; shift ;;
-          --force|-f) FORCE=true; shift ;;
-          --help|-h)
-            echo "Usage: etiquette [--provider claude|codex|gemini] [--force]"
-            echo ""
-            echo "Initialize Etiquette in current project"
-            echo ""
-            echo "Options:"
-            echo "  -p, --provider   Set provider (claude, codex, gemini)"
-            echo "  -f, --force      Reinitialize even if already exists"
-            echo "  -h, --help       Show this help"
-            exit 0
-            ;;
-          *) shift ;;
-        esac
-      done
+      show_help() {
+        echo "Etiquette v1.1.0 - Multi-agent swarm orchestration"
+        echo ""
+        echo "Usage: etiquette <command> [options]"
+        echo ""
+        echo "Commands:"
+        echo "  init [--provider codex|gemini]  Initialize in current project"
+        echo "  refresh                         Update skills only (fast)"
+        echo "  spawn                           Spawn agent crew"
+        echo "  status                          Show agent status"
+        echo "  help                            Show this help"
+        echo ""
+        echo "Examples:"
+        echo "  cd your-project"
+        echo "  tmux new -s etiquette"
+        echo "  etiquette init --provider codex"
+        echo "  etiquette spawn"
+      }
 
-      if [[ -d "$ETIQUETTE_DIR" ]] && [[ "$FORCE" == false ]]; then
-        echo "Etiquette already initialized in this project"
-        echo "Use --force to reinitialize"
-        exit 0
-      fi
+      cmd_init() {
+        local PROVIDER="" FORCE=false
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --provider|-p) PROVIDER="$2"; shift 2 ;;
+            --force|-f) FORCE=true; shift ;;
+            *) shift ;;
+          esac
+        done
+        if [[ -d "$ETIQUETTE_DIR" ]] && [[ "$FORCE" == false ]]; then
+          echo "✓ Etiquette already initialized"
+          echo "  Use 'etiquette refresh' to update skills"
+          echo "  Use 'etiquette init --force' to reinitialize"
+          exit 0
+        fi
+        echo "Initializing Etiquette..."
+        mkdir -p "$ETIQUETTE_DIR"/{bin,config,status,tasks,state,queue,registry,docs}
+        cp "$ETIQUETTE_LIBEXEC/hive" "$ETIQUETTE_DIR/"
+        cp "$ETIQUETTE_LIBEXEC/bin/"* "$ETIQUETTE_DIR/bin/"
+        [[ -z "$PROVIDER" ]] && { command -v codex &>/dev/null && PROVIDER="codex" || PROVIDER="gemini"; }
+        local SKILLS_DIR=".$PROVIDER/skills"
+        mkdir -p "$SKILLS_DIR"
+        cp -r "$ETIQUETTE_LIBEXEC/skills/"* "$SKILLS_DIR/"
+        echo "{\\"provider\\": \\"$PROVIDER\\", \\"version\\": \\"1.1.0\\"}" > "$ETIQUETTE_DIR/config/provider.json"
+        chmod +x "$ETIQUETTE_DIR/hive" "$ETIQUETTE_DIR/bin/"* 2>/dev/null || true
+        echo "✓ Etiquette initialized (provider: $PROVIDER)"
+        echo "  Next: tmux new -s etiquette && etiquette spawn"
+      }
 
-      echo "Initializing Etiquette in $(pwd)..."
+      cmd_refresh() {
+        [[ ! -d "$ETIQUETTE_DIR" ]] && { echo "Run 'etiquette init' first"; exit 1; }
+        local PROVIDER=$(grep -o '"provider"[^,]*' "$ETIQUETTE_DIR/config/provider.json" | cut -d'"' -f4)
+        PROVIDER="${PROVIDER:-codex}"
+        cp -r "$ETIQUETTE_LIBEXEC/skills/"* ".$PROVIDER/skills/"
+        cp "$ETIQUETTE_LIBEXEC/bin/"* "$ETIQUETTE_DIR/bin/"
+        echo "✓ Skills refreshed for $PROVIDER"
+      }
 
-      # Create directory structure
-      mkdir -p "$ETIQUETTE_DIR"/{bin,config,status,tasks,context,queue,registry,docs}
+      cmd_spawn() {
+        [[ ! -x "$ETIQUETTE_DIR/hive" ]] && { echo "Run 'etiquette init' first"; exit 1; }
+        exec "$ETIQUETTE_DIR/hive" spawn "$@"
+      }
 
-      # Copy scripts from libexec
-      cp "#{libexec}/.etiquette/hive" "$ETIQUETTE_DIR/"
-      cp "#{libexec}/.etiquette/bin/"* "$ETIQUETTE_DIR/bin/"
+      cmd_status() {
+        [[ ! -x "$ETIQUETTE_DIR/hive" ]] && { echo "Run 'etiquette init' first"; exit 1; }
+        exec "$ETIQUETTE_DIR/hive" status "$@"
+      }
 
-      # Determine provider (flag > env > auto-detect)
-      if [[ -n "$PROVIDER_OVERRIDE" ]]; then
-        PROVIDER="$PROVIDER_OVERRIDE"
-      elif [[ -n "$ETIQUETTE_PROVIDER" ]]; then
-        PROVIDER="$ETIQUETTE_PROVIDER"
-      elif command -v codex &>/dev/null && ! command -v claude &>/dev/null; then
-        PROVIDER="codex"
-      elif command -v gemini &>/dev/null && ! command -v claude &>/dev/null; then
-        PROVIDER="gemini"
-      else
-        PROVIDER="claude"
-      fi
-
-      # Validate provider
-      if [[ "$PROVIDER" != "claude" && "$PROVIDER" != "codex" && "$PROVIDER" != "gemini" ]]; then
-        echo "Error: Invalid provider '$PROVIDER'. Use: claude, codex, or gemini"
-        exit 1
-      fi
-
-      # Copy provider-specific docs
-      if [[ "$PROVIDER" == "codex" ]]; then
-        cp -r "#{libexec}/providers/codex/docs/"* "$ETIQUETTE_DIR/docs/" 2>/dev/null || true
-      elif [[ "$PROVIDER" == "gemini" ]]; then
-        cp -r "#{libexec}/providers/gemini/docs/"* "$ETIQUETTE_DIR/docs/" 2>/dev/null || true
-      fi
-
-      echo "{\\"provider\\": \\"$PROVIDER\\"}" > "$ETIQUETTE_DIR/config/provider.json"
-
-      # Make executable
-      chmod +x "$ETIQUETTE_DIR/hive" "$ETIQUETTE_DIR/bin/"*
-
-      # Generate iTerm profiles (macOS)
-      if [[ "$(uname)" == "Darwin" ]] && [[ -d "/Applications/iTerm.app" ]]; then
-        "$ETIQUETTE_DIR/bin/generate-profiles" 2>/dev/null || true
-      fi
-
-      echo ""
-      echo "✓ Etiquette initialized with provider: $PROVIDER"
-      echo ""
-      echo "Next steps:"
-      if [[ "$PROVIDER" != "claude" ]]; then
-        echo "  1. Start the launch daemon: .etiquette/bin/hive-launch-daemon"
-        echo "  2. Assign tasks: .etiquette/hive task kai 'Build feature'"
-        echo "  3. Launch crew: .etiquette/hive launch haack"
-      else
-        echo "  1. In Claude Code: /etiquette:hive-bootstrap"
-      fi
-      echo ""
+      case "${1:-help}" in
+        init)    shift; cmd_init "$@" ;;
+        refresh) shift; cmd_refresh "$@" ;;
+        spawn)   shift; cmd_spawn "$@" ;;
+        status)  shift; cmd_status "$@" ;;
+        help|--help|-h) show_help ;;
+        *) echo "Unknown: $1. Run 'etiquette help'"; exit 1 ;;
+      esac
     EOS
-
     chmod 0755, bin/"etiquette"
   end
 
   def caveats
     <<~EOS
-      Etiquette v#{version} installed!
+      Etiquette v1.1.0 installed!
 
       QUICK START:
         cd your-project
-        etiquette --provider codex
+        tmux new -s etiquette
+        etiquette init --provider codex
+        etiquette spawn
 
-      FOR CLAUDE CODE USERS:
-        etiquette
-        Then in Claude Code: /etiquette:hive-bootstrap
+      COMMANDS:
+        etiquette init      Initialize project
+        etiquette refresh   Update skills (fast)
+        etiquette spawn     Spawn agent crew
+        etiquette status    Show agent status
 
-      FOR CODEX/GEMINI USERS:
-        etiquette -p codex
-        Then start daemon: .etiquette/bin/hive-launch-daemon
-
-      DOCUMENTATION:
-        https://github.com/leepickdev/etiquette
+      DOCS: https://github.com/leepickdev/etiquette
     EOS
   end
 
   test do
-    system bin/"etiquette", "--help"
+    system bin/"etiquette", "help"
   end
 end
